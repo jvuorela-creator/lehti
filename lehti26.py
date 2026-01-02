@@ -1,24 +1,21 @@
 from PIL import Image, ImageDraw, ImageFont
 import re
 import os
+import sys
 
-# --- ASETUKSET ---
-# Määritä polut Minion Pro -fontteihin. 
-# Jos tiedostoja ei löydy, skripti yrittää käyttää järjestelmän oletusta.
-FONT_REGULAR_PATH = "MinionPro-Regular.otf"
-FONT_BOLD_PATH = "MinionPro-Bold.otf"
+# --- VIANETSINTÄ-ASETUKSET ---
+# Käytetään perusfonttia varmuuden vuoksi testivaiheessa
+FONT_NAME = "arial.ttf" 
 
-# Värit ja tyyli
-BG_COLOR = "#F9F7F1"       # "Eggshell" / Vanha paperi -sävy
-TEXT_COLOR = "#2A2A2A"     # Hyvin tumma harmaa (pehmeämpi kuin musta)
-ACCENT_COLOR = "#800000"   # Tummanpunainen (numeroille/otsikoille)
-BORDER_COLOR = "#555555"   # Reunuksen väri
+# Värit
+BG_COLOR = "#F9F7F1"
+TEXT_COLOR = "#2A2A2A"
+ACCENT_COLOR = "#800000"
+BORDER_COLOR = "#555555"
 
 IMAGE_WIDTH = 800
 PADDING = 60
-LINE_SPACING = 10
 
-# Lähdeteksti (siistitty rivinvaihdoista)
 RAW_DATA = """
 1 Pakkotyöverokarhut
 2 Henkiverokarhut
@@ -46,118 +43,100 @@ RAW_DATA = """
 7.2 Liikevaihtoverokarhu ja Alvi-karhu
 """
 
-def load_font(path, size, fallback="arial.ttf"):
-    """Yrittää ladata halutun fontin, palauttaa oletuksen jos ei onnistu."""
+def get_font(size):
+    """Hakee perusfontin vianetsintää varten."""
     try:
-        return ImageFont.truetype(path, size)
+        # Yritetään ladata Arial (yleisin Windows-fontti)
+        return ImageFont.truetype(FONT_NAME, size)
     except IOError:
-        print(f"Varoitus: Fonttia '{path}' ei löytynyt. Käytetään oletusta.")
-        # Yritetään ladata yleinen serif-fontti Windows/Linux/Mac -poluista
-        try:
-             # Yleinen Windows polku Times New Romanille
-            return ImageFont.truetype("times.ttf", size)
-        except:
-            return ImageFont.load_default()
+        # Jos ei onnistu, käytetään Pythonin sisäänrakennettua (ruma mutta toimii aina)
+        print("Huom: Arial-fonttia ei löytynyt, käytetään bittikarttafonttia.")
+        return ImageFont.load_default()
 
 def parse_data(text):
-    """Jäsentää tekstin pääotsikoihin ja alaotsikoihin."""
+    print("--- 1. Jäsennetään tekstiä ---")
     lines = text.strip().split('\n')
     parsed = []
     for line in lines:
         line = line.strip()
         if not line: continue
         
-        # Etsitään numero alusta (esim "3" tai "3.1")
         match = re.match(r'^(\d+(\.\d+)?)', line)
         if match:
             number = match.group(1)
             content = line[len(number):].strip()
-            is_sub = '.' in number # Jos numerossa on piste, se on alakohta
+            is_sub = '.' in number
             parsed.append({'num': number, 'text': content, 'is_sub': is_sub})
+            # Tulostetaan löydetty rivi varmistukseksi
+            print(f"Löydetty: {number} - {content}")
+    
+    print(f"Yhteensä {len(parsed)} riviä löydetty.\n")
     return parsed
 
 def create_infobox(data):
-    # 1. Ladataan fontit
-    title_font = load_font(FONT_BOLD_PATH, 42)
-    main_font_bold = load_font(FONT_BOLD_PATH, 28)
-    sub_font_reg = load_font(FONT_REGULAR_PATH, 26)
+    if not data:
+        print("VIRHE: Ei dataa piirrettäväksi!")
+        return None
+
+    print("--- 2. Lasketaan kuvan kokoa ---")
+    title_font = get_font(40)
+    main_font = get_font(28)
+    sub_font = get_font(24)
     
-    # 2. Lasketaan tarvittava korkeus
-    # Arvioidaan korkeus (otsikko + rivit + välit)
-    current_y = PADDING + 60 # Tila otsikolle
+    current_y = PADDING + 60
     for item in data:
         current_y += 35 if item['is_sub'] else 50
-    
     total_height = current_y + PADDING
+    print(f"Kuvan korkeudeksi tulee: {total_height} pikseliä")
     
-    # 3. Luodaan kuva
+    print("--- 3. Piirretään kuvaa ---")
     img = Image.new('RGB', (IMAGE_WIDTH, total_height), color=BG_COLOR)
     draw = ImageDraw.Draw(img)
     
-    # 4. Piirretään reunukset (kaksoisviiva tyylikkyyden vuoksi)
-    border_gap = 15
-    draw.rectangle(
-        [border_gap, border_gap, IMAGE_WIDTH - border_gap, total_height - border_gap], 
-        outline=BORDER_COLOR, width=2
-    )
-    draw.rectangle(
-        [border_gap + 4, border_gap + 4, IMAGE_WIDTH - border_gap - 4, total_height - border_gap - 4], 
-        outline=BORDER_COLOR, width=1
-    )
+    # Reunukset
+    draw.rectangle([15, 15, IMAGE_WIDTH - 15, total_height - 15], outline=BORDER_COLOR, width=2)
 
-    # 5. Piirretään pääotsikko
-    title_text = "Verokarhut"
-    # Keskitetään otsikko
-    try:
-        bbox = draw.textbbox((0, 0), title_text, font=title_font)
-        text_width = bbox[2] - bbox[0]
-    except AttributeError:
-        # Vanhemmat Pillow versiot
-        text_width = draw.textsize(title_text, font=title_font)[0]
-        
-    draw.text(((IMAGE_WIDTH - text_width) / 2, PADDING), title_text, font=title_font, fill=ACCENT_COLOR)
+    # Otsikko
+    draw.text((PADDING, PADDING), "Verokarhut (Testi)", font=title_font, fill=ACCENT_COLOR)
 
-    # 6. Piirretään lista
+    # Lista
     y = PADDING + 80
-    
     for item in data:
         num = item['num']
         text = item['text']
         
         if not item['is_sub']:
-            # PÄÄKOHTA (1, 2, 3...)
-            y += 15 # Hieman extra väliä ennen uutta pääryhmää
-            
-            # Piirretään numero korostusvärillä
-            draw.text((PADDING + 20, y), num, font=main_font_bold, fill=ACCENT_COLOR)
-            # Piirretään teksti
-            draw.text((PADDING + 70, y), text, font=main_font_bold, fill=TEXT_COLOR)
+            # Pääkohta
+            y += 15
+            draw.text((PADDING + 20, y), num, font=main_font, fill=ACCENT_COLOR)
+            draw.text((PADDING + 70, y), text, font=main_font, fill=TEXT_COLOR)
             y += 40
-            
-            # Piirretään ohut viiva pääkohdan alle
-            draw.line([PADDING + 20, y - 5, IMAGE_WIDTH - PADDING - 20, y - 5], fill="#DDDDDD", width=1)
-            
         else:
-            # ALAKOHTA (3.1, 3.2...)
-            # Sisennys
+            # Alakohta
             indent = 90
-            draw.text((PADDING + indent, y), num, font=sub_font_reg, fill="#666666")
-            draw.text((PADDING + indent + 60, y), text, font=sub_font_reg, fill=TEXT_COLOR)
+            draw.text((PADDING + indent, y), num, font=sub_font, fill="#666666")
+            draw.text((PADDING + indent + 60, y), text, font=sub_font, fill=TEXT_COLOR)
             y += 35
 
     return img
 
-# --- AJO ---
 if __name__ == "__main__":
     parsed_data = parse_data(RAW_DATA)
     final_image = create_infobox(parsed_data)
     
-    output_filename = "verokarhut_infolaatikko.png"
-    final_image.save(output_filename)
-    print(f"Kuva luotu onnistuneesti: {output_filename}")
-    
-    # Avaa kuva heti (toimii useimmissa käyttöjärjestelmissä)
-    try:
-        final_image.show()
-    except:
-        pass
+    if final_image:
+        filename = "verokarhut_testi.png"
+        # Tallennetaan nykyiseen kansioon
+        save_path = os.path.join(os.getcwd(), filename)
+        
+        final_image.save(save_path)
+        print(f"\n--- VALMIS ---")
+        print(f"Kuva tallennettu nimellä: {filename}")
+        print(f"Täysi polku: {save_path}")
+        
+        # Yritetään avata
+        try:
+            final_image.show()
+            print("Yritettiin avata kuva esikatseluun.")
+        except:
+            print("Kuvan automaattinen avaus epäonnistui, avaa tiedosto manuaalisesti.")
